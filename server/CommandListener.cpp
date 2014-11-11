@@ -195,7 +195,7 @@ CommandListener::CommandListener() :
     if (!sPppCtrl)
         sPppCtrl = new PppController();
     if (!sSoftapCtrl)
-        sSoftapCtrl = new SoftapController();
+        sSoftapCtrl = new SoftapController(this);
     if (!sBandwidthCtrl)
         sBandwidthCtrl = new BandwidthController();
     if (!sIdletimerCtrl)
