@@ -18,10 +18,10 @@
 #define _TETHER_CONTROLLER_H
 
 #include <netinet/in.h>
+#include <set>
+#include <string>
 
 #include "List.h"
-
-#define INVALID_TABLE_NUMBER -1
 
 typedef android::netd::List<char *> InterfaceCollection;
 typedef android::netd::List<struct in_addr> NetAddressCollection;
@@ -34,18 +34,17 @@ class TetherController {
     NetAddressCollection *mDnsForwarders;
     pid_t                 mDaemonPid;
     int                   mDaemonFd;
-    pid_t                 mRtrAdvPid; // IPv6 support
-    InterfaceCollection  *mUpstreamInterfaces;
+    std::set<std::string> mForwardingRequests;
 
 public:
     TetherController();
     virtual ~TetherController();
 
-    int setIpFwdEnabled(bool enable);
-    bool getIpFwdEnabled();
+    bool enableForwarding(const char* requester);
+    bool disableForwarding(const char* requester);
+    size_t forwardingRequestCount();
 
     int startTethering(int num_addrs, struct in_addr* addrs);
-
     int stopTethering();
     bool isTetheringStarted();
 
@@ -56,16 +55,10 @@ public:
     int tetherInterface(const char *interface);
     int untetherInterface(const char *interface);
     InterfaceCollection *getTetheredInterfaceList();
-    int startV6RtrAdv(int num_ifaces, char **ifaces, int table_number);
-    int stopV6RtrAdv();
-    bool isV6RtrAdvStarted();
-    int configureV6RtrAdv();
-    int addUpstreamInterface(char *iface);
-    int removeUpstreamInterface(char *iface);
 
 private:
     int applyDnsInterfaces();
-    int getIfaceIndexForIface(const char *iface);
+    bool setIpFwdEnabled();
 };
 
 #endif

@@ -502,37 +502,59 @@ CommandListener::IpFwdCmd::IpFwdCmd() :
                  NetdCommand("ipfwd") {
 }
 
-int CommandListener::IpFwdCmd::runCommand(SocketClient *cli,
-                                                      int argc, char **argv) {
-    int rc = 0;
+int CommandListener::IpFwdCmd::runCommand(SocketClient *cli, int argc, char **argv) {
+    bool matched = false;
+    bool success;
 
-    if (argc < 2) {
-        cli->sendMsg(ResponseCode::CommandSyntaxError, "Missing argument", false);
-        return 0;
+    if (argc == 2) {
+        //   0     1
+        // ipfwd status
+        if (!strcmp(argv[1], "status")) {
+            char *tmp = NULL;
+
+            asprintf(&tmp, "Forwarding %s",
+                     ((sTetherCtrl->forwardingRequestCount() > 0) ? "enabled" : "disabled"));
+            cli->sendMsg(ResponseCode::IpFwdStatusResult, tmp, false);
+            free(tmp);
+            return 0;
+        }
+    } else if (argc == 3) {
+        //  0      1         2
+        // ipfwd enable  <requester>
+        // ipfwd disable <requester>
+        if (!strcmp(argv[1], "enable")) {
+            matched = true;
+            success = sTetherCtrl->enableForwarding(argv[2]);
+        } else if (!strcmp(argv[1], "disable")) {
+            matched = true;
+            success = sTetherCtrl->disableForwarding(argv[2]);
+        }
+    } else if (argc == 4) {
+        //  0      1      2     3
+        // ipfwd  add   wlan0 dummy0
+        // ipfwd remove wlan0 dummy0
+        int ret = 0;
+        if (!strcmp(argv[1], "add")) {
+            matched = true;
+            ret = RouteController::enableTethering(argv[2], argv[3]);
+        } else if (!strcmp(argv[1], "remove")) {
+            matched = true;
+            ret = RouteController::disableTethering(argv[2], argv[3]);
+        }
+        success = (ret == 0);
+        errno = -ret;
     }
 
-    if (!strcmp(argv[1], "status")) {
-        char *tmp = NULL;
-
-        asprintf(&tmp, "Forwarding %s", (sTetherCtrl->getIpFwdEnabled() ? "enabled" : "disabled"));
-        cli->sendMsg(ResponseCode::IpFwdStatusResult, tmp, false);
-        free(tmp);
-        return 0;
-    } else if (!strcmp(argv[1], "enable")) {
-        rc = sTetherCtrl->setIpFwdEnabled(true);
-    } else if (!strcmp(argv[1], "disable")) {
-        rc = sTetherCtrl->setIpFwdEnabled(false);
-    } else {
+    if (!matched) {
         cli->sendMsg(ResponseCode::CommandSyntaxError, "Unknown ipfwd cmd", false);
         return 0;
     }
 
-    if (!rc) {
+    if (success) {
         cli->sendMsg(ResponseCode::CommandOkay, "ipfwd operation succeeded", false);
     } else {
         cli->sendMsg(ResponseCode::OperationFailed, "ipfwd operation failed", true);
     }
-
     return 0;
 }
 
@@ -544,7 +566,6 @@ int CommandListener::TetherCmd::runCommand(SocketClient *cli,
                                                       int argc, char **argv) {
     int rc = 0;
 
-    ALOGD("TetherCmd::runCommand. argc: %d. argv[0]: %s", argc, argv[0]);
     if (argc < 2) {
         cli->sendMsg(ResponseCode::CommandSyntaxError, "Missing argument", false);
         return 0;
@@ -613,11 +634,6 @@ int CommandListener::TetherCmd::runCommand(SocketClient *cli,
             } else if (!strcmp(argv[2], "remove")) {
                 rc = sTetherCtrl->untetherInterface(argv[3]);
             /* else if (!strcmp(argv[2], "list")) handled above */
-            } else if (!strcmp(argv[2], "add_upstream")) {
-                ALOGD("command %s %s %s %s", argv[0], argv[1], argv[2], argv[3]);
-                rc = sTetherCtrl->addUpstreamInterface(argv[3]);
-            } else if (!strcmp(argv[2], "remove_upstream")) {
-                rc = sTetherCtrl->removeUpstreamInterface(argv[3]);
             } else {
                 cli->sendMsg(ResponseCode::CommandParameterError,
                              "Unknown tether interface operation", false);
@@ -647,74 +663,6 @@ int CommandListener::TetherCmd::runCommand(SocketClient *cli,
         cli->sendMsg(ResponseCode::CommandOkay, "Tether operation succeeded", false);
     } else {
         cli->sendMsg(ResponseCode::OperationFailed, "Tether operation failed", true);
-    }
-
-    return 0;
-}
-
-CommandListener::V6RtrAdvCmd::V6RtrAdvCmd() :
-                 NetdCommand("v6rtradv") {
-}
-
-int CommandListener::V6RtrAdvCmd::runCommand(SocketClient *cli,
-                                                      int argc, char **argv) {
-    int rc = 0;
-
-    if (argc < 2) {
-        cli->sendMsg(ResponseCode::CommandSyntaxError, "Missing argument", false);
-        return 0;
-    }
-
-    if (!strcmp(argv[1], "stop")) {
-        rc = sTetherCtrl->stopV6RtrAdv();
-    } else if (!strcmp(argv[1], "status")) {
-        char *tmp = NULL;
-
-        asprintf(&tmp, "IPv6 Router Advertisement service %s",
-                 (sTetherCtrl->isV6RtrAdvStarted() ? "started" : "stopped"));
-        cli->sendMsg(ResponseCode::V6RtrAdvResult, tmp, false);
-        free(tmp);
-        return 0;
-    } else {
-        /*
-         * These commands take a minimum of 4 arguments
-         */
-        if (argc < 4) {
-            cli->sendMsg(ResponseCode::CommandSyntaxError, "Missing argument", false);
-            return 0;
-        }
-
-        if (!strcmp(argv[1], "start")) {
-            int num_ifaces = argc - 2;
-            int arg_index = 2;
-            rc = sTetherCtrl->startV6RtrAdv(num_ifaces, &argv[arg_index], INVALID_TABLE_NUMBER);
-        } else if (!strcmp(argv[1], "interface")) {
-            if (!strcmp(argv[2], "add")) {
-                rc = sTetherCtrl->tetherInterface(argv[3]);
-            } else if (!strcmp(argv[2], "remove")) {
-                rc = sTetherCtrl->untetherInterface(argv[3]);
-            } else if (!strcmp(argv[2], "list")) {
-                InterfaceCollection *ilist = sTetherCtrl->getTetheredInterfaceList();
-                InterfaceCollection::iterator it;
-
-                for (it = ilist->begin(); it != ilist->end(); ++it) {
-                    cli->sendMsg(ResponseCode::TetherInterfaceListResult, *it, false);
-                }
-            } else {
-                cli->sendMsg(ResponseCode::CommandParameterError,
-                             "Unknown tether interface operation", false);
-                return 0;
-            }
-        } else {
-            cli->sendMsg(ResponseCode::CommandSyntaxError, "Unknown v6rtradv cmd", false);
-            return 0;
-        }
-    }
-
-    if (!rc) {
-        cli->sendMsg(ResponseCode::CommandOkay, "V6RtrAdv operation succeeded", false);
-    } else {
-        cli->sendMsg(ResponseCode::OperationFailed, "V6RtrAdv operation failed", true);
     }
 
     return 0;
@@ -894,6 +842,16 @@ int CommandListener::ResolverCmd::runCommand(SocketClient *cli, int argc, char *
         } else {
             cli->sendMsg(ResponseCode::CommandSyntaxError,
                     "Wrong number of arguments to resolver flushnet", false);
+            return 0;
+        }
+    } else if (!strcmp(argv[1], "excludednsportrange")) {
+        // "resolver excludednsportrange <min_port> <max port>"
+        if (argc == 4) {
+            rc = sResolverCtrl->setDnsExcludedPorts(strtoul(argv[2], NULL, 0),
+                    strtoul(argv[3], NULL, 0));
+        } else {
+            cli->sendMsg(ResponseCode::CommandSyntaxError,
+                    "Wrong number of arguments to resolver excludednsportrange", false);
             return 0;
         }
     } else {
